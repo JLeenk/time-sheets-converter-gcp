@@ -1,0 +1,12 @@
+service: time-sheets-converter-backend
+runtime: java21
+env: standard
+env_variables:
+  spring_profiles_active: "prod"
+instance_class: F1
+handlers:
+  - url: .*
+    script: auto
+automatic_scaling:
+  min_instances: 1
+  max_instances: 1
