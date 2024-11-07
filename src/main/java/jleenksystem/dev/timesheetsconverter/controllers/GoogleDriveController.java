@@ -16,6 +16,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import jleenksystem.dev.timesheetsconverter.models.responses.structure.StructreFolderIdResponse;
+import jleenksystem.dev.timesheetsconverter.models.responses.structure.StructreResponse;
+import jleenksystem.dev.timesheetsconverter.models.responses.structure.StrutureStatus;
 import jleenksystem.dev.timesheetsconverter.services.GoogleDriveServiceI;
 import lombok.RequiredArgsConstructor;
 
@@ -95,36 +98,36 @@ public class GoogleDriveController {
 	}
 
 	@PostMapping("createRootFolder")
-	public ResponseEntity<String> createRootFolder(String userId) {
+	public ResponseEntity<StructreResponse> createRootFolder(String userId) {
 		if (userId == null || userId != null && userId.isBlank()) {
-			return ResponseEntity.badRequest().build();
+			return ResponseEntity.badRequest().body(new StructreResponse(StrutureStatus.ERROR, ""));
 		}
 		
 		try {
 			googleDriveService.createStructure(userId);
 			String rootFolderId = googleDriveService.getRootFolderId(userId);
-			return ResponseEntity.ok(rootFolderId);
+			return ResponseEntity.ok(new StructreResponse(StrutureStatus.CREATED, rootFolderId));
 		} catch (IOException | GeneralSecurityException e) {
 			e.printStackTrace();
 			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-					.body("File delete failed: " + e.getMessage());
+					.body(new StructreResponse(StrutureStatus.ERROR, ""));
 		}
 		
 	}
 
 	@DeleteMapping("deleteRootFolder")
-	public ResponseEntity<String> deleteRootFolder(String userId) {
+	public ResponseEntity<StructreResponse> deleteRootFolder(String userId) {
 		if (userId != null && userId.isBlank()) {
-			return ResponseEntity.badRequest().build();
+			return ResponseEntity.badRequest().body(new StructreResponse(StrutureStatus.ERROR, "Bad request"));
 		}
 
 		try {
 			googleDriveService.deleteStructure(userId);
-			return ResponseEntity.ok().build();
+			return ResponseEntity.ok().body(new StructreResponse(StrutureStatus.ERROR, "Root folder deleted"));
 		} catch (IOException | GeneralSecurityException e) {
 			e.printStackTrace();
 			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-					.body("File delete failed: " + e.getMessage());
+					.body(new StructreResponse(StrutureStatus.ERROR, "Folder delete failed: "));
 		}
 	}
 
@@ -187,7 +190,7 @@ public class GoogleDriveController {
 	}
 	
 	@GetMapping("getRootFolderId")
-	public ResponseEntity<String> getRootFolderId(String userId) {
+	public ResponseEntity<StructreFolderIdResponse> getRootFolderId(String userId) {
 		if (userId != null && userId.isBlank()) {
 			return ResponseEntity.badRequest().build();
 		}
@@ -195,15 +198,18 @@ public class GoogleDriveController {
 		String rootFolderId;
 		try {
 			rootFolderId = googleDriveService.getRootFolderId(userId);
-			return ResponseEntity.ok(rootFolderId);
+			if(rootFolderId.isBlank()) {
+				return ResponseEntity.ok(new StructreFolderIdResponse(StrutureStatus.DELETED, rootFolderId));
+			}
+			return ResponseEntity.ok(new StructreFolderIdResponse(StrutureStatus.CREATED, rootFolderId));
 		} catch (IOException e) {
 			e.printStackTrace();
 			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-					.body(String.format("Getting root Id is faild. Some IO mistake on server: %s",  e.getMessage()));
+					.body(new StructreFolderIdResponse(StrutureStatus.ERROR, null));
 		} catch (GeneralSecurityException e) {
 			e.printStackTrace();
 			return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-					.body(String.format("Getting root Id is faild. User %s is not authorized", userId));
+					.body(new StructreFolderIdResponse(StrutureStatus.ERROR, null));
 		}
 	}
 	
