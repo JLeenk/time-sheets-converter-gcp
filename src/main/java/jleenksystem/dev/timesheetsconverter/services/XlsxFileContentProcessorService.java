@@ -9,6 +9,7 @@ import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.NoSuchElementException;
 
 import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
@@ -74,16 +75,56 @@ public class XlsxFileContentProcessorService implements XlsxFileContentProcessor
 
 	@Override
 	public TimeSheet getEmployeeData(XSSFSheet sheet) {
-		TimeSheet timeSheet = TimeSheet.builder().id(getEmployeeId(sheet)).fullName(getEmployeeName(sheet))
-				.period(getPeriod(sheet)).build();
+		int id = getEmployeeId(sheet);
+		if(id <= 0) {
+			throw new NoSuchElementException();
+		}
+		
+		String employeeName = getEmployeeName(sheet);
+		if(employeeName.isBlank()) {
+			throw new NoSuchElementException();
+		}
+		
+		String period;
+		try {
+			period = getPeriod(sheet);
+		} catch (IllegalStateException | NumberFormatException e) {
+			throw new NoSuchElementException();
+		}
+		
+		TimeSheet timeSheet = TimeSheet.builder().id(id).fullName(employeeName)
+				.period(period).build();
 
 		for (int row = CLIENT_FIRST_ROW; row < TOTAL_CLIENTS_AMOUNT; row++) {
 			if (isTimeSheetClientRowExist(sheet, row)) {
+				
+				double hours;
+				
+				try {
+					hours = getEmployeeHours(sheet, row);
+				} catch (IllegalStateException | NumberFormatException e) {
+					throw new NoSuchElementException();
+				}
+
+				if(hours == 0) {
+					continue;
+				}
+				
+				int clientId = getClientId(sheet, row);
+				if(clientId <= 0) {
+					throw new NoSuchElementException();
+				}
+				
+				String clientName = getClientName(sheet, row);
+				if(clientName.isBlank()) {
+					throw new NoSuchElementException();
+				}
+				
 				TimeSheet.Client client = timeSheet.new Client();
-				client.setId(getClientId(sheet, row));
-				client.setName(getClientName(sheet, row));
+				client.setId(clientId);
+				client.setName(clientName);
 				client.setAddress(getClientAddress(sheet, row));
-				client.setHours(getEmployeeHours(sheet, row));
+				client.setHours(hours);
 
 				timeSheet.addClient(client);
 			} else {
@@ -142,7 +183,7 @@ public class XlsxFileContentProcessorService implements XlsxFileContentProcessor
 
 	private void setEmployeeReportRow(XSSFSheet reportSheet, Report.Employee emplyee, int row) {
 		Row employeeRow = reportSheet.getRow(row);
-		employeeRow.getCell(EMPLOYEE_REPORT_NAME_CELL).setCellValue(emplyee.getFullName());
+		employeeRow.getCell(EMPLOYEE_REPORT_NAME_CELL).setCellValue(emplyee.getFullName().toUpperCase());
 		employeeRow.getCell(EMPLOYEE_REPORT_PERIOD_CELL).setCellValue(emplyee.getPeriod());
 
 		DecimalFormat df = new DecimalFormat("#.##");

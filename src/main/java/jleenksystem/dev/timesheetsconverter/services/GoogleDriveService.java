@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.NoSuchElementException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -40,6 +41,7 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 
 	private static final String ROOT_FOLDER = "Time Sheets Converter";
 	private static final String TIME_SHEETS_FOLDER = "Time sheets";
+	private static final String ERROR_TIME_SHEETS_FOLDER = "Error Time sheets";
 	private static final String REPORTS_FOLDER = "Reports";
 	private static final String TEMPLATES_FOLDER = "Templates";
 	private static final String TIME_SHEET_TEMPLATE_NAME = "Time Sheet Template";
@@ -57,6 +59,7 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 
 		String rootFolderId = createFolder(driveService, ROOT_FOLDER, null);
 		createFolder(driveService, TIME_SHEETS_FOLDER, rootFolderId);
+		createFolder(driveService, ERROR_TIME_SHEETS_FOLDER, rootFolderId);
 		createFolder(driveService, REPORTS_FOLDER, rootFolderId);
 		createFolder(driveService, TEMPLATES_FOLDER, rootFolderId);
 	}
@@ -202,6 +205,10 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 	private static String getTimeSheetsFolderId(Drive service) throws IOException {
 		return findFolderIdByName(service, TIME_SHEETS_FOLDER, findRootFolderId(service));
 	}
+	
+	private static String getErrorTimeSheetsFolderId(Drive service) throws IOException {
+		return findFolderIdByName(service, ERROR_TIME_SHEETS_FOLDER, findRootFolderId(service));
+	}
 
 	private static String getReportsFolderId(Drive service) throws IOException {
 		return findFolderIdByName(service, REPORTS_FOLDER, findRootFolderId(service));
@@ -271,12 +278,14 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 		
 		Drive service;
 		String timeSheetsFolderId;
+		String errorTimeSheetsFolderId;
 		FileList fileList; 
 		
 		try {
 			service = authServiceI.getDriverService(userId);
 			
 			timeSheetsFolderId = getTimeSheetsFolderId(service);
+			errorTimeSheetsFolderId = getErrorTimeSheetsFolderId(service);
 
 			fileList = getAllFilesInFolder(service, timeSheetsFolderId);
 			
@@ -308,7 +317,8 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 					}
 				}
 
-			} catch (InvalidFormatException | IOException e) {
+			} catch (NoSuchElementException | InvalidFormatException | IOException e) {
+				moveFileToFolder(service, file.getId(), errorTimeSheetsFolderId);
 				e.printStackTrace();
 			}
 		}
@@ -353,6 +363,22 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 		generateReportStatus.put(userId, "Finished successfully");
 		isServerBusy = false;
 	}
+	
+	private static void moveFileToFolder(Drive driveService, String fileId, String targetFolderId) throws IOException {
+        // Get the file's current parents
+        File file = driveService.files().get(fileId)
+                .setFields("parents")
+                .execute();
+        String previousParents = String.join(",", file.getParents());
+
+        // Move the file to the target folder
+        driveService.files().update(fileId, null)
+                .setAddParents(targetFolderId)
+                .setRemoveParents(previousParents)
+                .setFields("id, parents")
+                .execute();
+
+    }
 
 	private TimeSheet getTimeSheet(InputStream is) throws InvalidFormatException, IOException {
 		XSSFSheet timeSheet = contentProcessorService.getTimeSheetContent(is);
