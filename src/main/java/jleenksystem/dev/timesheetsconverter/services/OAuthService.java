@@ -81,6 +81,7 @@ public class OAuthService implements OAuthServiceI {
 //		Userinfo userInfo = oauth2.userinfo().get().execute();
 		UUID uuid = UUID.randomUUID();
 
+		googleAuthorizationCodeFlow.getCredentialDataStore().clear();
 		googleAuthorizationCodeFlow.createAndStoreCredential(tokenResponse, uuid.toString());
 		
 		return uuid.toString();
@@ -90,6 +91,10 @@ public class OAuthService implements OAuthServiceI {
 	public Drive getDriverService(String userId) throws IOException, GeneralSecurityException {
 
 		Credential credential = googleAuthorizationCodeFlow.loadCredential(userId);
+
+		if(credential == null) {
+			throw new GeneralSecurityException();
+		}
 
 		return new Drive.Builder(GoogleNetHttpTransport.newTrustedTransport(), JSON_FACTORY, credential)
 				.setApplicationName(webConfig.getAppName()).build();

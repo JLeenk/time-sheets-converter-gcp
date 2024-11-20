@@ -48,9 +48,12 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 	private static final String REPORT_TEMPLATE_NAME = "Report Template";
 	private static boolean isServerBusy = false;
 
+	private static final String FINISHED_WITH_ERROR_STATUS = "Finished with error";
+	private static final String FINISHED_SUCCESSFULLY_STATUS = "Finished successfully";
+
 	private final OAuthServiceI authServiceI;
 	private final XlsxFileContentProcessorServiceI contentProcessorService;
-	
+
 	private static final ConcurrentMap<String, String> generateReportStatus = new ConcurrentHashMap<>();
 
 	@Override
@@ -205,7 +208,7 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 	private static String getTimeSheetsFolderId(Drive service) throws IOException {
 		return findFolderIdByName(service, TIME_SHEETS_FOLDER, findRootFolderId(service));
 	}
-	
+
 	private static String getErrorTimeSheetsFolderId(Drive service) throws IOException {
 		return findFolderIdByName(service, ERROR_TIME_SHEETS_FOLDER, findRootFolderId(service));
 	}
@@ -246,28 +249,36 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 		JsonBatchCallback<Void> callback = new JsonBatchCallback<Void>() {
 			@Override
 			public void onSuccess(Void content, HttpHeaders responseHeaders) {
-//				System.out.println("File deleted successfully.");
+				// System.out.println("File deleted successfully.");
 			}
 
 			@Override
 			public void onFailure(GoogleJsonError e, HttpHeaders responseHeaders) {
-//				System.err.println("Error deleting file: " + e.getMessage());
+				// System.err.println("Error deleting file: " + e.getMessage());
 			}
 		};
 
 		// Create a batch request
 		BatchRequest batch = service.batch();
 
+		byte count = 0;
+
 		// Iterate through the file list and queue each delete request in the batch
 		for (File file : fileList.getFiles()) {
-//			System.out.printf("Deleting file: %s (%s)%n", file.getName(), file.getId());
+			// System.out.printf("Deleting file: %s (%s)%n", file.getName(), file.getId());
 
 			service.files().delete(file.getId()).queue(batch, callback); // Queue the delete request in the batch
+			count++;
+			if (count == 10) {
+				count = 0;
+				// Execute the batch request
+				batch.execute();
+			}
 		}
 
-		// Execute the batch request
-		batch.execute();
-
+		if(count > 0) {
+			batch.execute();
+		}
 	}
 
 	@Async
@@ -275,29 +286,27 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 	public void generateReports(String userId) throws IOException, GeneralSecurityException {
 		isServerBusy = true;
 		generateReportStatus.put(userId, "InProcess");
-		
+
 		Drive service;
 		String timeSheetsFolderId;
 		String errorTimeSheetsFolderId;
-		FileList fileList; 
-		
+		FileList fileList;
+
 		try {
 			service = authServiceI.getDriverService(userId);
-			
+
 			timeSheetsFolderId = getTimeSheetsFolderId(service);
 			errorTimeSheetsFolderId = getErrorTimeSheetsFolderId(service);
 
 			fileList = getAllFilesInFolder(service, timeSheetsFolderId);
-			
+
 		} catch (IOException | GeneralSecurityException e) {
 			isServerBusy = false;
-			generateReportStatus.put(userId, "Finished with error");
+			generateReportStatus.put(userId, FINISHED_WITH_ERROR_STATUS);
 			throw e;
 		}
-		
-		
 
-		Map<Integer, Report> clients = new HashMap<Integer, Report>();
+		Map<Integer, Report> clients = new HashMap<>();
 
 		for (File file : fileList.getFiles()) {
 
@@ -322,21 +331,20 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 				e.printStackTrace();
 			}
 		}
-		
+
 		try {
 			deleteAllReports(userId);
 		} catch (IOException | GeneralSecurityException e) {
 			isServerBusy = false;
-			generateReportStatus.put(userId, "Finished with error");
+			generateReportStatus.put(userId, FINISHED_WITH_ERROR_STATUS);
 			throw e;
 		}
-
 
 		try (InputStream templateIS = downloadReportTemplate(userId);
 				OPCPackage pkg = OPCPackage.open(templateIS, true);
 				XSSFWorkbook wb = new XSSFWorkbook(pkg);
 				ByteArrayOutputStream baos = new ByteArrayOutputStream(65536);) {
-			
+
 			String reportsFolderId = getReportsFolderId(service);
 
 			for (Entry<Integer, Report> reportEntry : clients.entrySet()) {
@@ -352,33 +360,33 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 				contentProcessorService.cleanReport(report.getEmployees().size(), wb);
 			}
 
-		} catch (InvalidFormatException e1) {
+		} catch (InvalidFormatException e) {
 			// TODO Auto-generated catch block
-			e1.printStackTrace();
-			generateReportStatus.put(userId, "Finished with error");
+			e.printStackTrace();
+			generateReportStatus.put(userId, FINISHED_WITH_ERROR_STATUS);
 			isServerBusy = false;
 			return;
 		}
-		
-		generateReportStatus.put(userId, "Finished successfully");
+
+		generateReportStatus.put(userId, FINISHED_SUCCESSFULLY_STATUS);
 		isServerBusy = false;
 	}
-	
+
 	private static void moveFileToFolder(Drive driveService, String fileId, String targetFolderId) throws IOException {
-        // Get the file's current parents
-        File file = driveService.files().get(fileId)
-                .setFields("parents")
-                .execute();
-        String previousParents = String.join(",", file.getParents());
+		// Get the file's current parents
+		File file = driveService.files().get(fileId)
+				.setFields("parents")
+				.execute();
+		String previousParents = String.join(",", file.getParents());
 
-        // Move the file to the target folder
-        driveService.files().update(fileId, null)
-                .setAddParents(targetFolderId)
-                .setRemoveParents(previousParents)
-                .setFields("id, parents")
-                .execute();
+		// Move the file to the target folder
+		driveService.files().update(fileId, null)
+				.setAddParents(targetFolderId)
+				.setRemoveParents(previousParents)
+				.setFields("id, parents")
+				.execute();
 
-    }
+	}
 
 	private TimeSheet getTimeSheet(InputStream is) throws InvalidFormatException, IOException {
 		XSSFSheet timeSheet = contentProcessorService.getTimeSheetContent(is);
@@ -431,7 +439,7 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 		Drive service = authServiceI.getDriverService(userId);
 
 		String folderId = getTemplatesFolderId(service);
-		
+
 		try {
 			File template = findFileByName(service, TIME_SHEET_TEMPLATE_NAME, folderId);
 			service.files().delete(template.getId()).execute();
@@ -448,7 +456,7 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 	public void uploadTimeSheet(String userId, InputStream is) throws GeneralSecurityException, IOException {
 		Drive service = authServiceI.getDriverService(userId);
 
-		try (ByteArrayInputStream bais = new ByteArrayInputStream(is.readAllBytes())){
+		try (ByteArrayInputStream bais = new ByteArrayInputStream(is.readAllBytes())) {
 			String folderId = getTimeSheetsFolderId(service);
 			XSSFSheet sheet = contentProcessorService.getTimeSheetContent(bais);
 			bais.reset();
@@ -456,11 +464,11 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 			int employeeId = contentProcessorService.getEmployeeId(sheet);
 			String fileName = String.format("%s %s", employeeName, employeeId);
 			uploadFileToDrive(service, GoogleDriveMimeType.MS_EXCEL, fileName, folderId, bais);
-			
+
 		} catch (IOException | InvalidFormatException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
-		} 
+		}
 	}
 
 	@Override
@@ -477,7 +485,7 @@ public class GoogleDriveService implements GoogleDriveServiceI {
 			// TODO: handle exception
 			System.out.println("File not found continue update Report Template");
 		}
-		
+
 		uploadFileToDrive(service, GoogleDriveMimeType.MS_EXCEL, REPORT_TEMPLATE_NAME, folderId, is);
 
 	}

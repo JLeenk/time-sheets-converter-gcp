@@ -2,6 +2,7 @@ package jleenksystem.dev.timesheetsconverter.controllers;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.SocketTimeoutException;
 import java.security.GeneralSecurityException;
 
 import org.springframework.core.io.InputStreamResource;
@@ -182,6 +183,10 @@ public class GoogleDriveController {
 			googleDriveService.generateReports(userId);
 
 			return ResponseEntity.ok().build();
+		} catch (SocketTimeoutException e) {
+			e.printStackTrace();
+			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+					.body("File processing took too long; try rerunning the report generation.");
 		} catch (IOException | GeneralSecurityException e) {
 			e.printStackTrace();
 			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -222,7 +227,7 @@ public class GoogleDriveController {
 		String status = googleDriveService.getGenerateReportsStatus(userId);
 		
 		if(status == null || status.isBlank()) {
-			ResponseEntity.notFound();
+			return ResponseEntity.notFound().build();
 		}
 		
 	    return ResponseEntity.ok(status);
